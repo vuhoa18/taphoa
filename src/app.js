@@ -11,7 +11,7 @@ app.use(express.json()); // Dòng này giúp Backend đọc được JSON.string
 app.use(express.urlencoded({ extended: true }));
 // Cấu hình để Server có thể đọc được dữ liệu dạng JSON (rất quan trọng cho API)
 app.use(express.json());
-const cors = require("cors");
+
 app.use(cors());
 app.use(
   cors({
@@ -339,12 +339,10 @@ app.post("/api/login", async (req, res) => {
     const bcrypt = require("bcrypt");
 
     if (!username || !password) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          message: "Tài khoản hoặc mật khẩu không được để trống!",
-        });
+      return res.status(401).json({
+        success: false,
+        message: "Tài khoản hoặc mật khẩu không được để trống!",
+      });
     }
 
     // Truy vấn cơ sở dữ liệu (Tìm theo username viết thường để tránh lệch chữ hoa/thường)
