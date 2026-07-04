@@ -1,22 +1,24 @@
 const { Pool } = require("pg");
 
-// Khởi tạo Pool kết nối từ chuỗi biến môi trường DATABASE_URL
+// Tách chuỗi URL ra thành các thông số cấu hình độc lập để tránh lỗi bóc tách ký tự
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // Cấu hình bắt buộc để chấp nhận chứng chỉ tự ký (self-signed) trên Render
+  user: "postgres.ypahdompmcoxoryivfmk",
+  password: "Hoangvuhoa1808",
+  host: "aws-0-ap-southeast-1.pooler.supabase.com",
+  port: 6543,
+  database: "postgres",
   ssl: {
-    rejectUnauthorized: false,
+    rejectUnauthorized: false, // Bỏ qua lỗi self-signed certificate
   },
 });
 
-// Kiểm tra trạng thái kết nối
 pool
   .connect()
-  .then(() => {
-    console.log("🎉 XUẤT SẮC: Backend đã kết nối thành công với Supabase DB!");
-  })
-  .catch((err) => {
-    console.error("❌ Lỗi kết nối cơ sở dữ liệu: ", err.message);
-  });
+  .then(() =>
+    console.log(
+      "🎉 XUẤT SẮC: Backend đã kết nối thành công với Supabase DB bằng cấu hình Object!"
+    )
+  )
+  .catch((err) => console.error("❌ Lỗi kết nối cơ sở dữ liệu: ", err.message));
 
 module.exports = pool;
