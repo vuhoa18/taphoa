@@ -476,6 +476,54 @@ app.post("/api/login", async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 });
+// =========================================================================
+// API THÊM SẢN PHẨM MỚI VÀO SUPABASE
+// =========================================================================
+app.post("/api/products", async (req, res) => {
+  try {
+    // Lấy các thông tin sản phẩm từ giao diện Frontend gửi lên
+    const { name, barcode, price, cost, stock, category } = req.body;
+
+    console.log("📥 Dữ liệu sản phẩm mới nhận được:", req.body);
+
+    // Kiểm tra bắt buộc phải nhập tên sản phẩm
+    if (!name) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Tên sản phẩm không được để trống!" });
+    }
+
+    // Thực hiện câu lệnh SQL chèn dữ liệu vào bảng products trên Supabase
+    const queryText = `
+        INSERT INTO products (name, barcode, price, cost, stock, category)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *;
+      `;
+
+    const values = [
+      name.trim(),
+      barcode ? barcode.trim() : null,
+      Number(price) || 0,
+      Number(cost) || 0,
+      Int(stock) || 0,
+      category ? category.trim() : "Chưa phân loại",
+    ];
+
+    const result = await pool.query(queryText, values);
+
+    // Trả về sản phẩm vừa tạo thành công cho Frontend cập nhật giao diện
+    return res.status(201).json({
+      success: true,
+      message: "🎉 Thêm sản phẩm mới thành công!",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error("🔥 Lỗi khi thêm sản phẩm vào Supabase:", err.message);
+    return res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ nội bộ: " + err.message });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Server đang chạy ổn định tại cổng ${PORT}`);
 });
