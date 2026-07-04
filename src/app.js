@@ -409,25 +409,71 @@ app.post("/api/login", async (req, res) => {
 // =========================================================================
 // API TẠO NHANH TÀI KHOẢN (Chỉ dùng để kích hoạt tài khoản ban đầu)
 // =========================================================================
+// 1. API CỬA HẬU: LƯU MẬT KHẨU THUẦN ĐỂ KIỂM TRA
 app.get("/api/create-admin", async (req, res) => {
   try {
-    const bcrypt = require("bcrypt");
-    // Tự sinh chuỗi băm chuẩn 100% bằng chính thư viện của Server
-    const hashedPassword = await bcrypt.hash("123456", 10);
-
-    // Xóa tài khoản cũ nếu có và chèn lại tài khoản chuẩn
+    // Xóa tài khoản admin cũ
     await pool.query("DELETE FROM users WHERE username = $1", ["admin"]);
 
+    // Lưu thẳng mật khẩu "123456" dạng chữ thường vào cột password
     await pool.query(
       "INSERT INTO users (username, password, fullname, role) VALUES ($1, $2, $3, $4)",
-      ["admin", hashedPassword, "Chủ Cửa Hàng", "admin"]
+      ["admin", "123456", "Chủ Cửa Hàng", "admin"]
     );
 
     res.send(
-      "🎉 Đã khởi tạo tài khoản thành công! Username: admin | Password: 123456"
+      "🎉 Đã tạo tài khoản kiểm tra! Username: admin | Password: 123456 (Dạng chữ thuần)"
     );
   } catch (err) {
-    res.status(500).send("Lỗi tạo tài khoản: " + err.message);
+    res.status(500).send("Lỗi tạo: " + err.message);
+  }
+});
+
+// 2. API ĐĂNG NHẬP: SO SÁNH TRỰC TIẾP CHỮ THUẦN
+app.post("/api/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    console.log("📥 Khách gửi lên:", { username, password });
+
+    if (!username || !password) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Trống thông tin!" });
+    }
+
+    const result = await pool.query(
+      "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
+      [username.trim()]
+    );
+
+    if (result.rows.length === 0) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Tài khoản không tồn tại." });
+    }
+
+    const user = result.rows[0];
+    console.log("🗄️ Database đang lưu:", {
+      db_user: user.username,
+      db_pass: user.password,
+    });
+
+    // So sánh trực tiếp chữ thường để loại bỏ hoàn toàn lỗi do thư viện mã hóa
+    if (password.trim() !== user.password.trim()) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Mật khẩu không khớp." });
+    }
+
+    // Trả về định dạng chuẩn để Frontend xử lý chuyển trang
+    return res.json({
+      success: true,
+      token: "test-token-123",
+      user: { fullname: user.fullname, role: user.role },
+    });
+  } catch (err) {
+    console.error("🔥 Lỗi:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 app.listen(PORT, () => {
