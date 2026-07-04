@@ -337,12 +337,10 @@ app.post("/api/login", async (req, res) => {
 
     // 1. Kiểm tra dữ liệu đầu vào có bị trống không
     if (!username || !password) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Vui lòng nhập đầy đủ tài khoản và mật khẩu!",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng nhập đầy đủ tài khoản và mật khẩu!",
+      });
     }
 
     // 2. Truy vấn tìm tài khoản trong bảng users
@@ -352,12 +350,10 @@ app.post("/api/login", async (req, res) => {
 
     // Nếu không tìm thấy user
     if (result.rows.length === 0) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          message: "Tài khoản hoặc mật khẩu không chính xác.",
-        });
+      return res.status(401).json({
+        success: false,
+        message: "Tài khoản hoặc mật khẩu không chính xác.",
+      });
     }
 
     const user = result.rows[0];
@@ -365,12 +361,10 @@ app.post("/api/login", async (req, res) => {
     // 3. So sánh mật khẩu bằng bcrypt
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          message: "Tài khoản hoặc mật khẩu không chính xác.",
-        });
+      return res.status(401).json({
+        success: false,
+        message: "Tài khoản hoặc mật khẩu không chính xác.",
+      });
     }
 
     // 4. Trả về đúng cấu trúc dữ liệu mà Frontend (login.html) đang đợi
@@ -388,6 +382,30 @@ app.post("/api/login", async (req, res) => {
     return res
       .status(500)
       .json({ success: false, message: "Lỗi xử lý nội bộ: " + err.message });
+  }
+});
+// =========================================================================
+// API TẠO NHANH TÀI KHOẢN (Chỉ dùng để kích hoạt tài khoản ban đầu)
+// =========================================================================
+app.get("/api/create-admin", async (req, res) => {
+  try {
+    const bcrypt = require("bcrypt");
+    // Tự sinh chuỗi băm chuẩn 100% bằng chính thư viện của Server
+    const hashedPassword = await bcrypt.hash("123456", 10);
+
+    // Xóa tài khoản cũ nếu có và chèn lại tài khoản chuẩn
+    await pool.query("DELETE FROM users WHERE username = $1", ["admin"]);
+
+    await pool.query(
+      "INSERT INTO users (username, password, fullname, role) VALUES ($1, $2, $3, $4)",
+      ["admin", hashedPassword, "Chủ Cửa Hàng", "admin"]
+    );
+
+    res.send(
+      "🎉 Đã khởi tạo tài khoản thành công! Username: admin | Password: 123456"
+    );
+  } catch (err) {
+    res.status(500).send("Lỗi tạo tài khoản: " + err.message);
   }
 });
 app.listen(PORT, () => {
