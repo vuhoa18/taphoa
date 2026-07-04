@@ -190,12 +190,13 @@ app.delete("/api/products/:id", async (req, res) => {
 // ĐƯỜNG DẪN API 7: Đăng nhập (Phiên bản chạy thật trên Render)
 // =========================================================================
 // Thay thế hàm đăng nhập cũ bằng đoạn mã sử dụng thư viện crypto tiêu chuẩn
+// =========================================================================
+// API ĐĂNG NHẬP: SO SÁNH CHỮ THUẦN CẮT KHOẢNG TRẮNG TUYỆT ĐỐI
+// =========================================================================
 app.post("/api/login", async (req, res) => {
   try {
-    const crypto = require("crypto"); // Thư viện băm core của Node.js, cực kỳ ổn định
     const { username, password } = req.body;
-
-    console.log("📥 Dữ liệu nhận được:", { username, password });
+    console.log("📥 Dữ liệu đăng nhập nhận được:", { username, password });
 
     if (!username || !password) {
       return res
@@ -203,9 +204,9 @@ app.post("/api/login", async (req, res) => {
         .json({ success: false, message: "Không được để trống thông tin!" });
     }
 
-    // Tìm kiếm user (sử dụng trim() để loại bỏ khoảng trắng thừa)
+    // Tìm kiếm tài khoản và ép về chữ thường để tránh lỗi viết hoa/thường
     const result = await pool.query(
-      "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
+      "SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER($1)",
       [username.trim()]
     );
 
@@ -217,14 +218,11 @@ app.post("/api/login", async (req, res) => {
 
     const user = result.rows[0];
 
-    // Thực hiện băm mật khẩu người dùng vừa nhập bằng SHA256 để đối chiếu
-    const inputHash = crypto
-      .createHash("sha256")
-      .update(password.trim())
-      .digest("hex");
+    // Tiến hành so sánh: Cắt sạch khoảng trắng ở cả mật khẩu người dùng nhập và mật khẩu trong DB
+    const cleanInputPassword = password.trim();
+    const cleanDbPassword = user.password ? user.password.trim() : "";
 
-    // So sánh chuỗi băm trực tiếp (chống hoàn toàn lỗi lệch thư viện Bcrypt)
-    if (inputHash !== user.password) {
+    if (cleanInputPassword !== cleanDbPassword) {
       return res
         .status(401)
         .json({ success: false, message: "Mật khẩu không chính xác." });
@@ -237,8 +235,10 @@ app.post("/api/login", async (req, res) => {
       user: { fullname: user.fullname, role: user.role },
     });
   } catch (err) {
-    console.error("🔥 Lỗi đăng nhập:", err.message);
-    return res.status(500).json({ success: false, message: err.message });
+    console.error("🔥 Lỗi đăng nhập tại Backend:", err.message);
+    return res
+      .status(500)
+      .json({ success: false, message: "Lỗi hệ thống: " + err.message });
   }
 });
 
