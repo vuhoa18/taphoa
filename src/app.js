@@ -2,10 +2,13 @@
 
 const express = require("express");
 const pool = require("./config/database"); // Import cấu hình PostgreSQL đã làm ở bước trước
-
+const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(cors());
+app.use(express.json()); // Dòng này giúp Backend đọc được JSON.stringify từ Frontend
+app.use(express.urlencoded({ extended: true }));
 // Cấu hình để Server có thể đọc được dữ liệu dạng JSON (rất quan trọng cho API)
 app.use(express.json());
 const cors = require("cors");
@@ -327,61 +330,50 @@ app.put("/api/products/:id", async (req, res) => {
 // Khởi động Máy chủ Web
 // Sử dụng PORT của hosting cấp, nếu không có thì mới dùng 3000
 // =========================================================================
-// API ĐĂNG NHẬP CHUẨN - CHỐNG CRASH LỖI 500
-// =========================================================================
 app.post("/api/login", async (req, res) => {
-  // Bọc toàn bộ trong try-catch để nếu có lỗi, server không bị sập 500 vô cớ
   try {
+    // In ra log để kiểm tra xem Render có nhận được dữ liệu thực tế không
+    console.log("📥 Dữ liệu nhận được tại Backend:", req.body);
+
     const { username, password } = req.body;
     const bcrypt = require("bcrypt");
 
-    // 1. Kiểm tra dữ liệu đầu vào có bị trống không
     if (!username || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Vui lòng nhập đầy đủ tài khoản và mật khẩu!",
-      });
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Tài khoản hoặc mật khẩu không được để trống!",
+        });
     }
 
-    // 2. Truy vấn tìm tài khoản trong bảng users
-    const result = await pool.query("SELECT * FROM users WHERE username = $1", [
-      username,
-    ]);
+    // Truy vấn cơ sở dữ liệu (Tìm theo username viết thường để tránh lệch chữ hoa/thường)
+    const result = await pool.query(
+      "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
+      [username.trim()]
+    );
 
-    // Nếu không tìm thấy user
     if (result.rows.length === 0) {
-      return res.status(401).json({
-        success: false,
-        message: "Tài khoản hoặc mật khẩu không chính xác.",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "Tài khoản không tồn tại." });
     }
 
     const user = result.rows[0];
-
-    // 3. So sánh mật khẩu bằng bcrypt
     const isMatch = await bcrypt.compare(password, user.password);
+
     if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Tài khoản hoặc mật khẩu không chính xác.",
-      });
+      return res.status(401).json({ success: false, message: "Sai mật khẩu." });
     }
 
-    // 4. Trả về đúng cấu trúc dữ liệu mà Frontend (login.html) đang đợi
     return res.json({
       success: true,
-      token: "mock-jwt-token-cho-tap-hoa", // Tạo token giả lập để frontend lưu vào localStorage
-      user: {
-        fullname: user.fullname || "Nhân viên",
-        role: user.role || "staff",
-      },
+      token: "mock-jwt-token-cho-tap-hoa",
+      user: { fullname: user.fullname, role: user.role },
     });
   } catch (err) {
-    // In lỗi chi tiết ra hệ thống log của Render để bạn nhìn thấy cụ thể dòng nào sai
-    console.error("🔥 LỖI HỆ THỐNG ĐĂNG NHẬP:", err.message);
-    return res
-      .status(500)
-      .json({ success: false, message: "Lỗi xử lý nội bộ: " + err.message });
+    console.error("🔥 Lỗi xử lý đăng nhập:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
   }
 });
 // =========================================================================
