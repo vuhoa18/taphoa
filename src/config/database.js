@@ -2,9 +2,8 @@ const { Pool } = require("pg");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Thêm đoạn cấu hình ssl dưới đây để chạy được trên Render
   ssl: {
-    rejectUnauthorized: false,
+    rejectUnauthorized: false, // Bắt buộc phải có dòng này khi chạy trên Render
   },
 });
 
