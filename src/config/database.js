@@ -3,6 +3,7 @@ const { Pool } = require("pg");
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
+    // Thêm dòng dưới đây để chấp nhận các chứng chỉ tự ký (self-signed) từ Supabase pooler
     rejectUnauthorized: false,
   },
 });
