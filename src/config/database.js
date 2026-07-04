@@ -1,9 +1,13 @@
 const { Pool } = require("pg");
+const dns = require("dns");
+
+// Ép Node.js luôn ưu tiên tìm địa chỉ IPv4 trước thay vì IPv6
+dns.setDefaultResultOrder("ipv4first");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false, // Bắt buộc phải có dòng này khi chạy trên Render
+    rejectUnauthorized: false,
   },
 });
 
