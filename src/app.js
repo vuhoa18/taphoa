@@ -198,12 +198,10 @@ app.post("/api/login", async (req, res) => {
 
     // Nếu không tìm thấy tên đăng nhập trong bảng users
     if (result.rows.length === 0) {
-      return res
-        .status(401)
-        .json({
-          success: false,
-          message: "Sai tên đăng nhập hoặc tài khoản không tồn tại!",
-        });
+      return res.status(401).json({
+        success: false,
+        message: "Sai tên đăng nhập hoặc tài khoản không tồn tại!",
+      });
     }
 
     const user = result.rows[0];
@@ -223,12 +221,10 @@ app.post("/api/login", async (req, res) => {
   } catch (err) {
     // Ghi nhận lỗi chi tiết ra hệ thống log của Render để dễ theo dõi
     console.error("🔥 Lỗi đăng nhập tại hệ thống:", err.message);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Lỗi kết nối cơ sở dữ liệu: " + err.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Lỗi kết nối cơ sở dữ liệu: " + err.message,
+    });
   }
 });
 // =========================================================================
@@ -330,7 +326,70 @@ app.put("/api/products/:id", async (req, res) => {
 });
 // Khởi động Máy chủ Web
 // Sử dụng PORT của hosting cấp, nếu không có thì mới dùng 3000
+// =========================================================================
+// API ĐĂNG NHẬP CHUẨN - CHỐNG CRASH LỖI 500
+// =========================================================================
+app.post("/api/login", async (req, res) => {
+  // Bọc toàn bộ trong try-catch để nếu có lỗi, server không bị sập 500 vô cớ
+  try {
+    const { username, password } = req.body;
+    const bcrypt = require("bcrypt");
 
+    // 1. Kiểm tra dữ liệu đầu vào có bị trống không
+    if (!username || !password) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Vui lòng nhập đầy đủ tài khoản và mật khẩu!",
+        });
+    }
+
+    // 2. Truy vấn tìm tài khoản trong bảng users
+    const result = await pool.query("SELECT * FROM users WHERE username = $1", [
+      username,
+    ]);
+
+    // Nếu không tìm thấy user
+    if (result.rows.length === 0) {
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Tài khoản hoặc mật khẩu không chính xác.",
+        });
+    }
+
+    const user = result.rows[0];
+
+    // 3. So sánh mật khẩu bằng bcrypt
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Tài khoản hoặc mật khẩu không chính xác.",
+        });
+    }
+
+    // 4. Trả về đúng cấu trúc dữ liệu mà Frontend (login.html) đang đợi
+    return res.json({
+      success: true,
+      token: "mock-jwt-token-cho-tap-hoa", // Tạo token giả lập để frontend lưu vào localStorage
+      user: {
+        fullname: user.fullname || "Nhân viên",
+        role: user.role || "staff",
+      },
+    });
+  } catch (err) {
+    // In lỗi chi tiết ra hệ thống log của Render để bạn nhìn thấy cụ thể dòng nào sai
+    console.error("🔥 LỖI HỆ THỐNG ĐĂNG NHẬP:", err.message);
+    return res
+      .status(500)
+      .json({ success: false, message: "Lỗi xử lý nội bộ: " + err.message });
+  }
+});
 app.listen(PORT, () => {
   console.log(`Server đang chạy ổn định tại cổng ${PORT}`);
 });
