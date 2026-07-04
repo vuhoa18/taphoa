@@ -184,44 +184,53 @@ app.delete("/api/products/:id", async (req, res) => {
 });
 
 // =========================================================================
-// ĐƯỜNG DẪN API 7: Đăng nhập (Phiên bản tối giản)
+// ĐƯỜNG DẪN API 7: Đăng nhập (Phiên bản chạy thật trên Render)
 // =========================================================================
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
-  const bcrypt = require("bcrypt"); // Chỉ cần dùng thư viện kiểm tra mật khẩu
+  const bcrypt = require("bcrypt"); // Thư viện kiểm tra mật khẩu đã mã hóa
 
   try {
-    // 1. Tìm tài khoản
+    // 1. Tìm tài khoản trong database đám mây
     const result = await pool.query("SELECT * FROM users WHERE username = $1", [
       username,
     ]);
+
+    // Nếu không tìm thấy tên đăng nhập trong bảng users
     if (result.rows.length === 0) {
       return res
         .status(401)
-        .json({ success: false, message: "Sai tên đăng nhập!" });
+        .json({
+          success: false,
+          message: "Sai tên đăng nhập hoặc tài khoản không tồn tại!",
+        });
     }
 
     const user = result.rows[0];
 
-    // 2. Kiểm tra mật khẩu
+    // 2. So sánh mật khẩu người dùng nhập vào với mật khẩu đã băm (hashed) trong DB
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: "Sai mật khẩu!" });
     }
 
-    // 3. Đúng mật khẩu -> Trả về thông tin chức vụ, KHÔNG DÙNG TOKEN
+    // 3. Đúng mật khẩu -> Trả về thông tin thành công cho Frontend
     res.json({
       success: true,
       message: "✅ Đăng nhập thành công!",
       user: { fullname: user.fullname, role: user.role },
     });
   } catch (err) {
+    // Ghi nhận lỗi chi tiết ra hệ thống log của Render để dễ theo dõi
+    console.error("🔥 Lỗi đăng nhập tại hệ thống:", err.message);
     res
       .status(500)
-      .json({ success: false, message: "Lỗi server: " + err.message });
+      .json({
+        success: false,
+        message: "Lỗi kết nối cơ sở dữ liệu: " + err.message,
+      });
   }
 });
-
 // =========================================================================
 // ĐƯỜNG DẪN API 5: Xem Báo cáo Doanh thu (Đã bỏ chốt bảo vệ)
 // =========================================================================
