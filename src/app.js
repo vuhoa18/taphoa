@@ -1,281 +1,245 @@
-// File: src/app.js
-
 const express = require("express");
-const pool = require("./config/database"); // Import cấu hình PostgreSQL đã làm ở bước trước
+const pool = require("./config/database");
 const cors = require("cors");
+const crypto = require("crypto"); // Dùng cho đăng nhập
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json()); // Dòng này giúp Backend đọc được JSON.stringify từ Frontend
-app.use(express.urlencoded({ extended: true }));
-// Cấu hình để Server có thể đọc được dữ liệu dạng JSON (rất quan trọng cho API)
+// CẤU HÌNH MIDDLEWARE (Chỉ gọi 1 lần)
 app.use(express.json());
-
-app.use(cors());
+app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: ["http://taphoadanviet.id.vn", "https://taphoadanviet.id.vn"],
     credentials: true,
   })
 );
-// -------------------------------------------------------------------------
-// ĐƯỜNG DẪN API 1: Lấy toàn bộ danh sách sản phẩm để hiển thị lên Web
-// -------------------------------------------------------------------------
+
+// ==========================================
+// NHÓM API: KHÁCH HÀNG (PUBLIC)
+// ==========================================
+
+// 1. Lấy danh sách hàng hóa cho Khách hàng (Thêm is_featured)
+app.get("/api/public/products", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, price, category, is_featured 
+      FROM products 
+      WHERE is_public = true AND stock > 0 
+      ORDER BY category ASC, id DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
+  }
+});
+
+// ==========================================
+// NHÓM API: QUẢN LÝ SẢN PHẨM & KHO HÀNG
+// ==========================================
+
+// 2. Lấy toàn bộ danh sách sản phẩm (Cho Admin/Thu ngân)
 app.get("/api/products", async (req, res) => {
   try {
-    // Lệnh SQL lấy tất cả sản phẩm, sắp xếp theo ID tăng dần
-    const result = await pool.query("SELECT * FROM products ORDER BY id ASC");
-
-    // Trả dữ liệu về cho phía Giao diện Web (Frontend)
-    res.json({
-      success: true,
-      data: result.rows,
-    });
+    const result = await pool.query("SELECT * FROM products ORDER BY id DESC");
+    res.json({ success: true, data: result.rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// -------------------------------------------------------------------------
-// ĐƯỜNG DẪN API 2: Tìm sản phẩm bằng Mã Vạch (Phục vụ tính năng quét mã tít tít)
-// Đường dẫn thực tế sẽ có dạng: /api/products/scan/8934563138164
-// -------------------------------------------------------------------------
+// 3. Tìm sản phẩm bằng Mã Vạch
 app.get("/api/products/scan/:barcode", async (req, res) => {
   try {
-    const { barcode } = req.params; // Lấy mã vạch người dùng vừa quét truyền lên
-
-    // Tìm kiếm sản phẩm trong PostgreSQL khớp với mã vạch
+    const { barcode } = req.params;
     const result = await pool.query(
       "SELECT * FROM products WHERE barcode = $1",
       [barcode]
     );
-
-    // Nếu không tìm thấy sản phẩm nào
     if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Không tìm thấy sản phẩm với mã vạch này!",
-      });
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy sản phẩm!" });
     }
-
-    // Nếu tìm thấy, trả về thông tin sản phẩm đó
-    res.json({
-      success: true,
-      data: result.rows[0],
-    });
+    res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-// Thêm API Thanh toán vào src/app.js
 
-// -------------------------------------------------------------------------
-// ĐƯỜNG DẪN API 3: Thanh toán hóa đơn và Trừ kho (Dùng Transaction)
-// -------------------------------------------------------------------------
-app.post("/api/checkout", async (req, res) => {
-  const { items, totalPrice } = req.body; // Giao diện Web sẽ gửi lên danh sách món hàng và tổng tiền
-
-  // Lấy một "nhân viên" từ Hồ bơi kết nối để thực hiện một Giao dịch (Transaction)
-  const client = await pool.connect();
-
+// 4. Thêm sản phẩm mới vào kho
+app.post("/api/products", async (req, res) => {
+  const { barcode, name, price, stock, category, is_public } = req.body;
   try {
-    await client.query("BEGIN"); // Bắt đầu khóa an toàn: "All or Nothing"
+    const result = await pool.query(
+      `INSERT INTO products (barcode, name, price, stock, category, is_public) 
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        barcode?.trim() || null,
+        name?.trim(),
+        Number(price) || 0,
+        parseInt(stock, 10) || 0,
+        category?.trim() || "Khác",
+        is_public ?? true,
+      ]
+    );
+    res
+      .status(201)
+      .json({
+        success: true,
+        message: "✅ Đã thêm sản phẩm mới!",
+        productId: result.rows[0].id,
+      });
+  } catch (err) {
+    if (err.code === "23505")
+      return res
+        .status(400)
+        .json({ success: false, message: "❌ Lỗi: Mã vạch đã tồn tại!" });
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
+  }
+});
 
-    // 1. Tạo Hóa đơn mới và lấy ID của hóa đơn đó (RETURNING id)
+// 5. Cập nhật thông tin sản phẩm
+app.put("/api/products/:id", async (req, res) => {
+  const { id } = req.params;
+  const { barcode, name, price, stock, category } = req.body;
+  try {
+    await pool.query(
+      "UPDATE products SET barcode = $1, name = $2, price = $3, stock = $4, category = $5 WHERE id = $6",
+      [
+        barcode?.trim() || null,
+        name?.trim(),
+        Number(price) || 0,
+        parseInt(stock, 10) || 0,
+        category?.trim() || "Khác",
+        id,
+      ]
+    );
+    res.json({ success: true, message: "✅ Cập nhật sản phẩm thành công!" });
+  } catch (err) {
+    if (err.code === "23505")
+      return res
+        .status(400)
+        .json({ success: false, message: "❌ Lỗi: Mã vạch bị trùng!" });
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
+  }
+});
+
+// 6. Xóa sản phẩm
+app.delete("/api/products/:id", async (req, res) => {
+  try {
+    const result = await pool.query("DELETE FROM products WHERE id = $1", [
+      req.params.id,
+    ]);
+    if (result.rowCount === 0)
+      return res
+        .status(404)
+        .json({ success: false, message: "Không tìm thấy sản phẩm!" });
+    res.json({ success: true, message: "🗑️ Đã xóa sản phẩm!" });
+  } catch (err) {
+    if (err.code === "23503")
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "❌ Không thể xóa vì đã có trong hóa đơn!",
+        });
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
+  }
+});
+
+// 7. Bật/Tắt hiển thị trên Web
+app.put("/api/products/:id/toggle-public", async (req, res) => {
+  try {
+    await pool.query("UPDATE products SET is_public = $1 WHERE id = $2", [
+      req.body.is_public,
+      req.params.id,
+    ]);
+    res.json({
+      success: true,
+      message: "Đã cập nhật trạng thái hiển thị Web!",
+    });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
+  }
+});
+
+// 8. Bật/Tắt Hàng Nổi Bật (Tươi Mới) - API MỚI
+app.put("/api/products/:id/toggle-featured", async (req, res) => {
+  try {
+    await pool.query("UPDATE products SET is_featured = $1 WHERE id = $2", [
+      req.body.is_featured,
+      req.params.id,
+    ]);
+    res.json({ success: true, message: "Đã cập nhật trạng thái nổi bật!" });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
+  }
+});
+
+// ==========================================
+// NHÓM API: GIAO DỊCH & BÁO CÁO
+// ==========================================
+
+// 9. Thanh toán hóa đơn (Transaction)
+app.post("/api/checkout", async (req, res) => {
+  const { items, totalPrice } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
     const orderResult = await client.query(
       "INSERT INTO orders (total_price) VALUES ($1) RETURNING id",
       [totalPrice]
     );
     const orderId = orderResult.rows[0].id;
 
-    // 2. Lặp qua từng món hàng khách mua để lưu chi tiết và trừ kho
     for (let item of items) {
-      // Lưu chi tiết hàng hóa vào hóa đơn
       await client.query(
         "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)",
         [orderId, item.id, item.quantity, item.price]
       );
-
-      // Trừ đi số lượng tồn kho trong bảng products
       await client.query(
         "UPDATE products SET stock = stock - $1 WHERE id = $2",
         [item.quantity, item.id]
       );
     }
-
-    await client.query("COMMIT"); // Mọi thứ hoàn hảo -> Lưu vĩnh viễn vào Database
-
+    await client.query("COMMIT");
     res.json({
       success: true,
       message: "🎉 Thanh toán thành công!",
       orderId: orderId,
     });
   } catch (err) {
-    await client.query("ROLLBACK"); // Có lỗi xảy ra -> Hủy bỏ mọi thay đổi để bảo toàn dữ liệu kho
+    await client.query("ROLLBACK");
     res
       .status(500)
       .json({ success: false, message: "Lỗi thanh toán: " + err.message });
   } finally {
-    client.release(); // Trả "nhân viên" về lại Hồ bơi cho khách khác dùng
+    client.release();
   }
 });
 
-// =========================================================================
-// ĐƯỜNG DẪN API 4: Thêm sản phẩm mới vào kho (Đã nâng cấp)
-// =========================================================================
-app.post("/api/products", async (req, res) => {
-  // Lấy thêm category và is_public từ Web gửi lên
-  const { barcode, name, price, stock, category, is_public } = req.body;
-
-  try {
-    const result = await pool.query(
-      `INSERT INTO products (barcode, name, price, stock, category, is_public) 
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [barcode, name, price, stock, category, is_public]
-    );
-
-    res.json({
-      success: true,
-      message: "✅ Đã thêm sản phẩm mới vào kho thành công!",
-      productId: result.rows[0].id,
-    });
-  } catch (err) {
-    if (err.code === "23505") {
-      res
-        .status(400)
-        .json({ success: false, message: "❌ Lỗi: Mã vạch này đã tồn tại!" });
-    } else {
-      res
-        .status(500)
-        .json({ success: false, message: "Lỗi máy chủ: " + err.message });
-    }
-  }
-});
-
-// -------------------------------------------------------------------------
-// ĐƯỜNG DẪN API 6: Xóa sản phẩm khỏi kho
-// -------------------------------------------------------------------------
-app.delete("/api/products/:id", async (req, res) => {
-  const { id } = req.params; // Lấy ID của sản phẩm cần xóa từ đường dẫn web
-
-  try {
-    const result = await pool.query("DELETE FROM products WHERE id = $1", [id]);
-
-    // Nếu không tìm thấy sản phẩm để xóa (result.rowCount là số dòng bị ảnh hưởng)
-    if (result.rowCount === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "❌ Không tìm thấy sản phẩm này!" });
-    }
-
-    res.json({ success: true, message: "🗑️ Đã xóa sản phẩm thành công!" });
-  } catch (err) {
-    // Mã lỗi 23503 của PostgreSQL nghĩa là: Dữ liệu đang bị dính với bảng khác (Hóa đơn)
-    if (err.code === "23503") {
-      res.status(400).json({
-        success: false,
-        message:
-          "❌ Không thể xóa! Sản phẩm này đã từng được bán và đang lưu trong Hóa đơn.",
-      });
-    } else {
-      res
-        .status(500)
-        .json({ success: false, message: "Lỗi máy chủ: " + err.message });
-    }
-  }
-});
-
-// =========================================================================
-// ĐƯỜNG DẪN API 7: Đăng nhập (Phiên bản chạy thật trên Render)
-// =========================================================================
-// Thay thế hàm đăng nhập cũ bằng đoạn mã sử dụng thư viện crypto tiêu chuẩn
-// =========================================================================
-// API ĐĂNG NHẬP: SO SÁNH CHỮ THUẦN CẮT KHOẢNG TRẮNG TUYỆT ĐỐI
-// =========================================================================
-app.post("/api/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    console.log("📥 Dữ liệu đăng nhập nhận được:", { username, password });
-
-    if (!username || !password) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Không được để trống thông tin!" });
-    }
-
-    // Tìm kiếm tài khoản và ép về chữ thường để tránh lỗi viết hoa/thường
-    const result = await pool.query(
-      "SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER($1)",
-      [username.trim()]
-    );
-
-    if (result.rows.length === 0) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Tài khoản không tồn tại." });
-    }
-
-    const user = result.rows[0];
-
-    // Tiến hành so sánh: Cắt sạch khoảng trắng ở cả mật khẩu người dùng nhập và mật khẩu trong DB
-    const cleanInputPassword = password.trim();
-    const cleanDbPassword = user.password ? user.password.trim() : "";
-
-    if (cleanInputPassword !== cleanDbPassword) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Mật khẩu không chính xác." });
-    }
-
-    // Đăng nhập thành công, trả dữ liệu đúng định dạng Frontend chờ
-    return res.json({
-      success: true,
-      token: "secure-token-tap-hoa",
-      user: { fullname: user.fullname, role: user.role },
-    });
-  } catch (err) {
-    console.error("🔥 Lỗi đăng nhập tại Backend:", err.message);
-    return res
-      .status(500)
-      .json({ success: false, message: "Lỗi hệ thống: " + err.message });
-  }
-});
-
-// CẬP NHẬT LUÔN API CỬA HẬU ĐỂ ĐỒNG BỘ MẬT KHẨU MỚI
-app.get("/api/create-admin", async (req, res) => {
-  try {
-    const crypto = require("crypto");
-    // Băm mật khẩu "123456" theo chuẩn SHA256
-    const newHash = crypto.createHash("sha256").update("123456").digest("hex");
-
-    await pool.query("DELETE FROM users WHERE username = $1", ["admin"]);
-    await pool.query(
-      "INSERT INTO users (username, password, fullname, role) VALUES ($1, $2, $3, $4)",
-      ["admin", newHash, "Chủ Cửa Hàng", "admin"]
-    );
-
-    res.send(
-      "🎉 Đã tạo lại tài khoản admin bằng SHA256 thành công! Hãy thử đăng nhập."
-    );
-  } catch (err) {
-    res.status(500).send("Lỗi: " + err.message);
-  }
-});
-// =========================================================================
-// ĐƯỜNG DẪN API 5: Xem Báo cáo Doanh thu (Đã bỏ chốt bảo vệ)
-// =========================================================================
+// 10. Báo cáo doanh thu
 app.get("/api/reports/revenue", async (req, res) => {
   try {
-    const summaryResult = await pool.query(`
-        SELECT COUNT(id) AS total_orders, COALESCE(SUM(total_price), 0) AS total_revenue 
-        FROM orders
-      `);
-    const recentOrdersResult = await pool.query(`
-        SELECT id, total_price, created_at 
-        FROM orders ORDER BY created_at DESC LIMIT 10
-      `);
-
+    const summaryResult = await pool.query(
+      "SELECT COUNT(id) AS total_orders, COALESCE(SUM(total_price), 0) AS total_revenue FROM orders"
+    );
+    const recentOrdersResult = await pool.query(
+      "SELECT id, total_price, created_at FROM orders ORDER BY created_at DESC LIMIT 10"
+    );
     res.json({
       success: true,
       data: {
@@ -290,241 +254,71 @@ app.get("/api/reports/revenue", async (req, res) => {
   }
 });
 
-// =========================================================================
-// ĐƯỜNG DẪN API 8: Lấy danh sách hàng hóa cho Khách hàng (Public)
-// =========================================================================
-app.get("/api/public/products", async (req, res) => {
-  try {
-    // Chỉ lấy những mặt hàng được phép hiển thị (is_public = true) và còn hàng (stock > 0)
-    // Sắp xếp theo Danh mục (category) để dễ nhóm trên giao diện
-    const result = await pool.query(`
-        SELECT id, name, price, category 
-        FROM products 
-        WHERE is_public = true AND stock > 0 
-        ORDER BY category ASC, id DESC
-      `);
+// ==========================================
+// NHÓM API: ĐĂNG NHẬP (Chỉ giữ lại 1 bản duy nhất, băm SHA256)
+// ==========================================
 
-    res.json({
-      success: true,
-      data: result.rows,
-    });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Lỗi lấy dữ liệu: " + err.message });
-  }
-});
-// =========================================================================
-// ĐƯỜNG DẪN API 9: Bật/Tắt hiển thị sản phẩm trên Web
-// =========================================================================
-app.put("/api/products/:id/toggle-public", async (req, res) => {
-  const { id } = req.params;
-  const { is_public } = req.body; // Trạng thái checkbox (true/false) gửi từ web lên
-
-  try {
-    await pool.query("UPDATE products SET is_public = $1 WHERE id = $2", [
-      is_public,
-      id,
-    ]);
-    res.json({ success: true, message: "Đã cập nhật trạng thái!" });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Lỗi máy chủ: " + err.message });
-  }
-});
-// =========================================================================
-// ĐƯỜNG DẪN API 10: Cập nhật (Sửa) thông tin sản phẩm
-// =========================================================================
-app.put("/api/products/:id", async (req, res) => {
-  const { id } = req.params;
-  const { barcode, name, price, stock, category } = req.body; // Các thông tin mới
-
-  try {
-    await pool.query(
-      "UPDATE products SET barcode = $1, name = $2, price = $3, stock = $4, category = $5 WHERE id = $6",
-      [barcode, name, price, stock, category, id]
-    );
-    res.json({ success: true, message: "✅ Cập nhật sản phẩm thành công!" });
-  } catch (err) {
-    // Bắt lỗi nếu mã vạch mới sửa bị trùng với một món hàng khác đã có
-    if (err.code === "23505") {
-      res
-        .status(400)
-        .json({ success: false, message: "❌ Lỗi: Mã vạch này đã bị trùng!" });
-    } else {
-      res
-        .status(500)
-        .json({ success: false, message: "Lỗi máy chủ: " + err.message });
-    }
-  }
-});
-// Khởi động Máy chủ Web
-// Sử dụng PORT của hosting cấp, nếu không có thì mới dùng 3000
-// =========================================================================
-app.post("/api/login", async (req, res) => {
-  try {
-    // In ra log để kiểm tra xem Render có nhận được dữ liệu thực tế không
-    console.log("📥 Dữ liệu nhận được tại Backend:", req.body);
-
-    const { username, password } = req.body;
-    const bcrypt = require("bcrypt");
-
-    if (!username || !password) {
-      return res.status(401).json({
-        success: false,
-        message: "Tài khoản hoặc mật khẩu không được để trống!",
-      });
-    }
-
-    // Truy vấn cơ sở dữ liệu (Tìm theo username viết thường để tránh lệch chữ hoa/thường)
-    const result = await pool.query(
-      "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
-      [username.trim()]
-    );
-
-    if (result.rows.length === 0) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Tài khoản không tồn tại." });
-    }
-
-    const user = result.rows[0];
-    const isMatch = await bcrypt.compare(password, user.password);
-
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Sai mật khẩu." });
-    }
-
-    return res.json({
-      success: true,
-      token: "mock-jwt-token-cho-tap-hoa",
-      user: { fullname: user.fullname, role: user.role },
-    });
-  } catch (err) {
-    console.error("🔥 Lỗi xử lý đăng nhập:", err.message);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-// =========================================================================
-// API TẠO NHANH TÀI KHOẢN (Chỉ dùng để kích hoạt tài khoản ban đầu)
-// =========================================================================
-// 1. API CỬA HẬU: LƯU MẬT KHẨU THUẦN ĐỂ KIỂM TRA
-app.get("/api/create-admin", async (req, res) => {
-  try {
-    // Xóa tài khoản admin cũ
-    await pool.query("DELETE FROM users WHERE username = $1", ["admin"]);
-
-    // Lưu thẳng mật khẩu "123456" dạng chữ thường vào cột password
-    await pool.query(
-      "INSERT INTO users (username, password, fullname, role) VALUES ($1, $2, $3, $4)",
-      ["admin", "123456", "Chủ Cửa Hàng", "admin"]
-    );
-
-    res.send(
-      "🎉 Đã tạo tài khoản kiểm tra! Username: admin | Password: 123456 (Dạng chữ thuần)"
-    );
-  } catch (err) {
-    res.status(500).send("Lỗi tạo: " + err.message);
-  }
-});
-
-// 2. API ĐĂNG NHẬP: SO SÁNH TRỰC TIẾP CHỮ THUẦN
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body;
-    console.log("📥 Khách gửi lên:", { username, password });
-
-    if (!username || !password) {
+    if (!username || !password)
       return res
         .status(401)
         .json({ success: false, message: "Trống thông tin!" });
-    }
 
     const result = await pool.query(
-      "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
+      "SELECT * FROM users WHERE LOWER(TRIM(username)) = LOWER($1)",
       [username.trim()]
     );
-
-    if (result.rows.length === 0) {
+    if (result.rows.length === 0)
       return res
         .status(401)
         .json({ success: false, message: "Tài khoản không tồn tại." });
-    }
 
     const user = result.rows[0];
-    console.log("🗄️ Database đang lưu:", {
-      db_user: user.username,
-      db_pass: user.password,
-    });
 
-    // So sánh trực tiếp chữ thường để loại bỏ hoàn toàn lỗi do thư viện mã hóa
-    if (password.trim() !== user.password.trim()) {
+    // Hash password nhập vào để so sánh với DB
+    const inputHash = crypto
+      .createHash("sha256")
+      .update(password.trim())
+      .digest("hex");
+
+    if (inputHash !== user.password && password.trim() !== user.password) {
       return res
         .status(401)
-        .json({ success: false, message: "Mật khẩu không khớp." });
+        .json({ success: false, message: "Mật khẩu không chính xác." });
     }
 
-    // Trả về định dạng chuẩn để Frontend xử lý chuyển trang
     return res.json({
       success: true,
-      token: "test-token-123",
+      token: "secure-token-tap-hoa",
       user: { fullname: user.fullname, role: user.role },
     });
   } catch (err) {
-    console.error("🔥 Lỗi:", err.message);
-    return res.status(500).json({ success: false, message: err.message });
-  }
-});
-// =========================================================================
-// API THÊM SẢN PHẨM MỚI VÀO SUPABASE
-// =========================================================================
-// =========================================================================
-// API THÊM SẢN PHẨM MỚI VÀO SUPABASE (ĐÃ SỬA LỖI CÚ PHÁP)
-// =========================================================================
-app.post("/api/products", async (req, res) => {
-  try {
-    const { name, barcode, price, cost, stock, category } = req.body;
-
-    console.log("📥 Dữ liệu sản phẩm mới nhận được:", req.body);
-
-    if (!name) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Tên sản phẩm không được để trống!" });
-    }
-
-    const queryText = `
-        INSERT INTO products (name, barcode, price, cost, stock, category)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *;
-      `;
-
-    // ĐÃ SỬA: Đổi Int(stock) thành parseInt(stock, 10) để tránh lỗi crash 500
-    const values = [
-      name.trim(),
-      barcode ? barcode.trim() : null,
-      Number(price) || 0,
-      Number(cost) || 0,
-      parseInt(stock, 10) || 0, // Sử dụng parseInt tiêu chuẩn
-      category ? category.trim() : "Chưa phân loại",
-    ];
-
-    const result = await pool.query(queryText, values);
-
-    return res.status(201).json({
-      success: true,
-      message: "🎉 Thêm sản phẩm mới thành công!",
-      data: result.rows[0],
-    });
-  } catch (err) {
-    console.error("🔥 Lỗi khi thêm sản phẩm vào Supabase:", err.message);
     return res
       .status(500)
-      .json({ success: false, message: "Lỗi máy chủ nội bộ: " + err.message });
+      .json({ success: false, message: "Lỗi hệ thống: " + err.message });
   }
 });
 
+// API Cửa hậu tạo admin chuẩn
+app.get("/api/create-admin", async (req, res) => {
+  try {
+    const newHash = crypto.createHash("sha256").update("123456").digest("hex");
+    await pool.query("DELETE FROM users WHERE username = $1", ["admin"]);
+    await pool.query(
+      "INSERT INTO users (username, password, fullname, role) VALUES ($1, $2, $3, $4)",
+      ["admin", newHash, "Chủ Cửa Hàng", "admin"]
+    );
+    res.send(
+      "🎉 Đã tạo lại tài khoản admin! Username: admin | Password: 123456"
+    );
+  } catch (err) {
+    res.status(500).send("Lỗi: " + err.message);
+  }
+});
+
+// Bật Server
 app.listen(PORT, () => {
-  console.log(`Server đang chạy ổn định tại cổng ${PORT}`);
+  console.log(`🚀 Server Backend Tạp Hóa đang chạy cực mượt tại cổng ${PORT}`);
 });

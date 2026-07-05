@@ -1,32 +1,47 @@
+const pool = require("./database");
 
-
-// Import lại cấu hình pool mà bạn vừa kết nối thành công ở lượt trước
-const pool = require('./database');
-
-// Câu lệnh SQL để tạo bảng sản phẩm
 const createTableQuery = `
   CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
-    barcode VARCHAR(50) UNIQUE NOT NULL, -- Lưu mã vạch 1D/2D, không được trùng lặp
-    name VARCHAR(255) NOT NULL,          -- Tên sản phẩm (Ví dụ: Mì Hảo Hảo chua cay)
-    price NUMERIC(12, 2) NOT NULL,       -- Giá bán (Dùng NUMERIC để tính tiền chính xác tuyệt đối)
-    stock INT NOT NULL DEFAULT 0         -- Số lượng tồn kho (Mặc định ban đầu là 0)
+    barcode VARCHAR(50) UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    price NUMERIC(12, 2) NOT NULL,
+    stock INT NOT NULL DEFAULT 0,
+    category VARCHAR(100) DEFAULT 'Khác',
+    is_public BOOLEAN DEFAULT true,
+    is_featured BOOLEAN DEFAULT false
   );
 `;
 
 async function initDatabase() {
   try {
-    // Gửi câu lệnh SQL sang PostgreSQL để thực thi
+    // 1. Tạo bảng nếu chưa có
     await pool.query(createTableQuery);
-    console.log('🎉 Tuyệt vời! Đã tạo bảng "products" thành công trong cơ sở dữ liệu!');
+    console.log('🎉 Đã kiểm tra/tạo bảng "products" thành công!');
+
+    // 2. Tự động thêm các cột mới nếu bảng cũ chưa có (bỏ qua lỗi nếu cột đã tồn tại)
+    const columnsToAdd = [
+      "ALTER TABLE products ADD COLUMN category VARCHAR(100) DEFAULT 'Khác';",
+      "ALTER TABLE products ADD COLUMN is_public BOOLEAN DEFAULT true;",
+      "ALTER TABLE products ADD COLUMN is_featured BOOLEAN DEFAULT false;",
+    ];
+
+    for (let query of columnsToAdd) {
+      try {
+        await pool.query(query);
+        console.log(`✅ Đã cập nhật thêm cột mới vào Database.`);
+      } catch (e) {
+        // Bỏ qua lỗi nếu cột đã tồn tại
+      }
+    }
+
+    console.log("✨ Cơ sở dữ liệu đã sẵn sàng cho tính năng Mới!");
   } catch (err) {
-    console.error('❌ Lỗi khi tạo bảng:', err.message);
+    console.error("❌ Lỗi khi khởi tạo CSDL:", err.message);
   } finally {
-    // Đóng hồ bơi kết nối sau khi đã hoàn thành tác vụ
     await pool.end();
-    console.log('🔌 Đã ngắt kết nối an toàn.');
+    console.log("🔌 Đã ngắt kết nối an toàn.");
   }
 }
 
-// Chạy hàm khởi tạo
 initDatabase();
